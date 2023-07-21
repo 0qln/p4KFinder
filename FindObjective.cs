@@ -13,7 +13,11 @@ namespace p4KFinder
         Monitor1_Exact,
         Monitor2_ExactAndBigger,
         Monitor2_Exact,
-        All
+        All,
+        AllMonitors_ExactAndBigger,
+        AllMonitors_Exact,
+        MonitorIndex_ExactAndBigger,
+        MonitorIndex_Exact
     }
 }
 

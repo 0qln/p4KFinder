@@ -6,7 +6,9 @@ using p4KFinder;
 
 class Program
 {
-    static FindObjective objective;
+    private static (FindObjective Type, int MonitorIndex) _objective;
+    private static int _combinedWidth;
+    private static int _combinedHeight;
 
     static void Main(string[] args)
     {
@@ -16,7 +18,6 @@ class Program
         int furthestRight = Helper.MonitorRects[0].Right;
         int furthestTop = Helper.MonitorRects[0].top;
         int furthestBottom = Helper.MonitorRects[0].bottom;
-
         for (int i = 1; i < Helper.Monitors.Count; i++)
         {
             if (Helper.MonitorRects[i].Left < furthestLeft) furthestLeft = Helper.MonitorRects[i].Left;
@@ -24,15 +25,11 @@ class Program
             if (Helper.MonitorRects[i].top < furthestTop) furthestTop = Helper.MonitorRects[i].top;
             if (Helper.MonitorRects[i].bottom > furthestBottom) furthestBottom = Helper.MonitorRects[i].bottom;
         }
+        _combinedWidth = Math.Abs(furthestLeft - furthestRight);
+        _combinedHeight = Math.Abs(furthestTop - furthestBottom);
+        Console.WriteLine($"    Combined width: {_combinedWidth}");
+        Console.WriteLine($"    Combined hight: {_combinedHeight}");
 
-        int combinedWidth = Math.Abs(furthestLeft - furthestRight);
-        int combinedHeight = Math.Abs(furthestTop - furthestBottom);
-
-        Console.WriteLine($"Combined height: {combinedHeight}");
-        Console.WriteLine($"Combined width: {combinedWidth}");
-
-        Console.WriteLine($"    Combined width: {combinedWidth}");
-        Console.WriteLine($"    Combined hight: {combinedHeight}");
 
         Console.WriteLine("Enter your directory: ");
         string parentDir = Console.ReadLine() ?? "";
@@ -46,49 +43,54 @@ class Program
             "\n" +
             "What do you want to find? \n" +
             "   ( [0]: Pseudo 4k images) \n" +
-            "   ( [1.1]: All images that are the size of or bigger than your first monitor)\n" +
-            "   ( [1.2]: All images that are the exactly size of your first monitor)\n" +
-            "   ( [2.1]: All images that are the size of or bigger than your second monitor)\n" +
-            "   ( [2.2]: All images that are the exactly size of your second monitor)\n" +
-            "   ( [3]: All images)\n" +
-           $"   ( [4]: All images that have a resolution high enough to stretch over all your monitors ({combinedWidth}x{combinedHeight}))\n" + // TODO
-           $"   ( [4.1]: All images that have the exact resolution, like all your monitors combined, when arranged in your setup({combinedWidth}x{combinedHeight}))\n" + // TODO
-            "   ( [5[index]]: All images that are the size of or bigger than your [index] monitor)\n" + //TODO
-            "   ( [5.1[index]]: All images that are the exactly size of your [index] monitor)" //TODO
+            "   ( [1]: All images that are the size of or bigger than your first monitor)\n" +
+            "   ( [2]: All images that are the exactly size of your first monitor)\n" +
+            "   ( [3]: All images that are the size of or bigger than your second monitor)\n" +
+            "   ( [4]: All images that are the exactly size of your second monitor)\n" +
+            "   ( [5]: All images)\n" +
+           $"   ( [6]: All images that have a resolution high enough to stretch over all your monitors (min.{_combinedWidth}x{_combinedHeight}))\n" +
+           $"   ( [7]: All images that have the exact resolution, like all your monitors combined, when arranged in your setup({_combinedWidth}x{_combinedHeight}))\n" +
+            "   ( [8_index]: All images that are the size of or bigger than your [index] monitor)\n" +
+            "   ( [9_index]: All images that are the exactly size of your [index] monitor)" 
         );
 
-        string? input = Console.ReadLine();
-        switch (input)
+        string[] input = Console.ReadLine()?.Split('_') ?? new string[0];
+        try
         {
-            case "0":
-                objective = FindObjective.Pseudo4k;
-                break;
-            case "1.1":
-                objective = FindObjective.Monitor1_ExactAndBigger;
-                break;
-            case "1.2":
-                objective = FindObjective.Monitor1_Exact;
-                break;
-            case"2.1":
-                objective = FindObjective.Monitor2_ExactAndBigger;
-                break;
-            case "2.2":
-                objective = FindObjective.Monitor2_Exact;
-                break;
-            case "3":
-                objective = FindObjective.All;
-                break;
-
-            default:
-                Console.WriteLine("Not an option.");
-                return;
+            _objective.Type = (FindObjective)int.Parse(input[0]);
         }
+        catch (Exception e)
+        {
+            Console.WriteLine("Invalid objective.");
+            Console.WriteLine(e.ToString());
+            return;
+        }
+
+        if (input.Length == 2)
+        {
+            try
+            {
+                _objective.MonitorIndex = int.Parse(input[0]);
+
+                if (_objective.MonitorIndex < 0 || _objective.MonitorIndex >= Helper.Monitors.Count)
+                {
+                    throw new IndexOutOfRangeException();
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Invalid monitorIndex.");
+                Console.WriteLine(e.ToString());
+                return;
+            }
+        }
+
 
         int dupFileNames = 0;
 
-        List<string> list = GetAllPseudo4kImages(parentDir).ToList();
+        List<string> list = GetAllPseudo4kImages(parentDir).Result.ToList();
 
-        string newDir = GetUniqePathName($"pseudo4k_{Enum.GetName(objective)}", parentDir);
+        string newDir = GetUniqePathName($"pseudo4k_{Enum.GetName(_objective.Type)}", parentDir); // clean this up
         Directory.CreateDirectory(newDir);
 
 
@@ -149,7 +151,7 @@ class Program
         return result;
     }
 
-    static IEnumerable<string> GetAllPseudo4kImages(string dir)
+    static async ValueTask<IEnumerable<string>> GetAllPseudo4kImages(string dir)
     {
         var result = new List<string>();
 
@@ -159,10 +161,12 @@ class Program
                 Console.WriteLine($"Image found: {path}");
         }
 
+        var tasks = new List<Task>();
         foreach (string path in Directory.GetDirectories(dir))
         {
-            result.AddRange(GetAllPseudo4kImages(path));
+            tasks.Add(Task.Run(() => result.AddRange(GetAllPseudo4kImages(path).Result)));
         }
+        await Task.WhenAll(tasks);
 
         return result;
     }
@@ -176,9 +180,9 @@ class Program
                 return false; // Skip if it's a symbolic link
             }
 
-            using (var imageStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (var data = Image.FromStream(imageStream, false, false))
-            switch (objective)
+            using var imageStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var data = Image.FromStream(imageStream, false, false);
+            switch (_objective.Type)
             {
                 case FindObjective.Pseudo4k:
                     if (data.Width > 1920 && data.Height > 1920)
@@ -190,7 +194,7 @@ class Program
                 case FindObjective.Monitor1_ExactAndBigger:
                     if (data.Width >= Helper.Monitors[0].Width && data.Height >= Helper.Monitors[0].Height)
                         result.Add(path);
-                    else 
+                    else
                         return false;
                     break;
 
@@ -220,12 +224,40 @@ class Program
                     result.Add(path);
                     return true;
 
+                case FindObjective.AllMonitors_ExactAndBigger:
+                    if (data.Width >= _combinedWidth && data.Height >= _combinedHeight)
+                        result.Add(path);
+                    else
+                        return false;
+                    break;
+
+                case FindObjective.AllMonitors_Exact:
+                    if (data.Width == _combinedWidth && data.Height == _combinedHeight)
+                        result.Add(path);
+                    else
+                        return false;
+                    break;
+
+                case FindObjective.MonitorIndex_ExactAndBigger:
+                    if (data.Width >= Helper.Monitors[0].Width && data.Height >= Helper.Monitors[0].Height)
+                        result.Add(path);
+                    else
+                        return false;
+                    break;
+
+                case FindObjective.MonitorIndex_Exact:
+                    if (data.Width == Helper.Monitors[_objective.MonitorIndex].Width && data.Height == Helper.Monitors[_objective.MonitorIndex].Height)
+                        result.Add(path);
+                    else
+                        return false;
+                    break;
+
             }
             return true;
         }
-        catch 
+        catch
         {
-            return false;    
+            return false;
         }
     }
 }
